@@ -134,6 +134,9 @@ func (u *UniswapV3) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string)
 	if token0 == baseToken {
 		price = price.Mul(decimal.NewFromInt(10).Pow(decimal.NewFromInt(int64(baseTokenDecimal - quoteTokenDecimal))))
 	} else {
+		if price.String() == "0" {
+			return nil, errors.New("price is zero")
+		}
 		price = price.Mul(decimal.NewFromInt(10).Pow(decimal.NewFromInt(int64(quoteTokenDecimal - baseTokenDecimal))))
 		price = decimal.NewFromInt(1).Div(price)
 	}
