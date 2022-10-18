@@ -6,6 +6,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/huahuayu/go-eth-util/contract/erc20"
 	. "github.com/huahuayu/go-eth-util/contract/uniswap/factory/v3"
 	. "github.com/huahuayu/go-eth-util/contract/uniswap/pair/v3"
 	"github.com/huahuayu/go-eth-util/dex/backend/uniswap/entity"
@@ -13,6 +14,7 @@ import (
 	"github.com/shopspring/decimal"
 	"log"
 	"math/big"
+	"strings"
 )
 
 type UniswapV3 struct {
@@ -112,9 +114,23 @@ func (u *UniswapV3) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string)
 	if err != nil {
 		return nil, err
 	}
+	var sqrtPriceX96Big *big.Int
 	res, err := pairContract.Slot0(opts)
 	if err != nil {
-		return nil, err
+		// try to get reserves from event
+		if strings.Contains(err.Error(), "missing trie node") {
+			blockNumber := opts.BlockNumber
+			start := blockNumber.Uint64()
+			if swapIterator, err := pairContract.FilterSwap(&bind.FilterOpts{Start: start, End: &start}, nil, nil); err == nil && swapIterator != nil {
+				for swapIterator.Next() {
+					sqrtPriceX96Big = swapIterator.Event.SqrtPriceX96
+				}
+			}
+		} else {
+			return nil, err
+		}
+	} else {
+		sqrtPriceX96Big = res.SqrtPriceX96
 	}
 	baseTokenDecimal, err := util.TokenDecimal(u.EthClient, baseToken)
 	if err != nil {
@@ -129,7 +145,7 @@ func (u *UniswapV3) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string)
 	//    sqrtPriceX96 / (2 ** 96) = sqrt(price)
 	//    (sqrtPriceX96 / (2 ** 96)) ** 2 = price
 	//    sqrtPriceX96 ** 2 / 2 ** 192 = price
-	sqrtPriceX96 := decimal.NewFromBigInt(res.SqrtPriceX96, 0)
+	sqrtPriceX96 := decimal.NewFromBigInt(sqrtPriceX96Big, 0)
 	price := sqrtPriceX96.Mul(sqrtPriceX96).Div(decimal.NewFromInt(2).Pow(decimal.NewFromInt(192)))
 	if token0 == baseToken {
 		price = price.Mul(decimal.NewFromInt(10).Pow(decimal.NewFromInt(int64(baseTokenDecimal - quoteTokenDecimal))))
@@ -167,4 +183,35 @@ func (u *UniswapV3) PairFor(baseToken, quoteToken string, feeRate ...int) (strin
 		return "", errors.New("no pair found")
 	}
 	return pair, nil
+}
+
+func (u *UniswapV3) Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error) {
+	pair, err := u.PairFor(baseToken, quoteToken)
+	if err != nil {
+		return nil, nil, err
+	}
+	baseTokenDecimal, err := util.TokenDecimal(u.EthClient, baseToken)
+	if err != nil {
+		return nil, nil, err
+	}
+	quoteTokenDecimal, err := util.TokenDecimal(u.EthClient, quoteToken)
+	if err != nil {
+		return nil, nil, err
+	}
+	var baseReserve, quoteReserve decimal.Decimal
+	if erc20, _ := erc20.NewIerc20(common.HexToAddress(baseToken), u.EthClient); erc20 != nil {
+		if balance, err := erc20.BalanceOf(opts, common.HexToAddress(pair)); balance != nil && err == nil {
+			baseReserve = decimal.NewFromBigInt(balance, -int32(baseTokenDecimal))
+		} else {
+			return nil, nil, err
+		}
+	}
+	if erc20, _ := erc20.NewIerc20(common.HexToAddress(quoteToken), u.EthClient); erc20 != nil {
+		if balance, err := erc20.BalanceOf(opts, common.HexToAddress(pair)); balance != nil && err == nil {
+			quoteReserve = decimal.NewFromBigInt(balance, -int32(quoteTokenDecimal))
+		} else {
+			return nil, nil, err
+		}
+	}
+	return &baseReserve, &quoteReserve, nil
 }

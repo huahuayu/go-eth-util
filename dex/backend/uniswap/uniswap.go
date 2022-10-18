@@ -21,6 +21,8 @@ type IUniswap interface {
 	WatchPairCreated() (event.Subscription, chan *entity.PairCreated, error)
 	// FilterPairCreated returns the event of PairCreated with block range.
 	FilterPairCreated(fromBlock uint64, toBlock *uint64) ([]*entity.PairCreated, error)
+	// Liquidity returns the liquidity of the pair.
+	Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error)
 }
 
 func NewUniswap(ethClient *ethclient.Client, version string, factory string) (IUniswap, error) {

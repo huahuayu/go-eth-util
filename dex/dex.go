@@ -14,6 +14,8 @@ type IDex interface {
 	// If middleToken is not empty, it indicates the price of baseToken/middleTokens/quoteToken.
 	// Get history spot price by specify blockNumber in call opts , if blockNumber is nil, it will return the latest spot price.
 	SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleTokens ...string) (*decimal.Decimal, error)
+	// Liquidity returns the liquidity of the pair.
+	Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error)
 }
 
 func NewDex(ethClient *ethclient.Client, protocol string, version string, param any) (IDex, error) {

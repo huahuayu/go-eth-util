@@ -13,6 +13,7 @@ import (
 	"github.com/shopspring/decimal"
 	"log"
 	"math/big"
+	"strings"
 )
 
 type UniswapV2 struct {
@@ -100,32 +101,12 @@ func (u *UniswapV2) FilterPairCreated(fromBlock uint64, toBlock *uint64) ([]*ent
 }
 
 func (u *UniswapV2) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, error) {
-	p, err := u.PairFor(baseToken, quoteToken)
+	baseReserves, quoteReserves, err := u.Liquidity(opts, baseToken, quoteToken)
 	if err != nil {
 		return nil, err
 	}
-	pairContract, err := NewPair(common.HexToAddress(p), u.EthClient)
-	if err != nil {
-		return nil, err
-	}
-	reserves, err := pairContract.GetReserves(opts)
-	if err != nil {
-		return nil, err
-	}
-	baseTokenDecimal, err := util.TokenDecimal(u.EthClient, baseToken)
-	if err != nil {
-		return nil, err
-	}
-	quoteTokenDecimal, err := util.TokenDecimal(u.EthClient, quoteToken)
-	if err != nil {
-		return nil, err
-	}
-	token0, _ := util.SortToken(baseToken, quoteToken)
-	if token0 == baseToken {
-		return calculatePrice(reserves.Reserve0, reserves.Reserve1, int32(baseTokenDecimal), int32(quoteTokenDecimal))
-	} else {
-		return calculatePrice(reserves.Reserve1, reserves.Reserve0, int32(baseTokenDecimal), int32(quoteTokenDecimal))
-	}
+	price := quoteReserves.Div(*baseReserves)
+	return &price, nil
 }
 
 func (u *UniswapV2) PairFor(baseToken, quoteToken string, feeRate ...int) (string, error) {
@@ -139,10 +120,50 @@ func (u *UniswapV2) PairFor(baseToken, quoteToken string, feeRate ...int) (strin
 	return pair.String(), nil
 }
 
-func calculatePrice(baseTokenReserve, quoteTokenReserve *big.Int, baseTokenDecimals, quoteTokenDecimals int32) (*decimal.Decimal, error) {
-	if decimal.NewFromBigInt(baseTokenReserve, -baseTokenDecimals) == decimal.Zero {
-		return nil, errors.New("base token reserve is zero")
+func (u *UniswapV2) Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error) {
+	p, err := u.PairFor(baseToken, quoteToken)
+	if err != nil {
+		return nil, nil, err
 	}
-	p := decimal.NewFromBigInt(quoteTokenReserve, -quoteTokenDecimals).Div(decimal.NewFromBigInt(baseTokenReserve, -baseTokenDecimals))
-	return &p, nil
+	pairContract, err := NewPair(common.HexToAddress(p), u.EthClient)
+	if err != nil {
+		return nil, nil, err
+	}
+	reserves, err := pairContract.GetReserves(opts)
+	if err != nil {
+		// try to get reserves from event
+		if strings.Contains(err.Error(), "missing trie node") {
+			blockNumber := opts.BlockNumber
+			start := blockNumber.Uint64()
+			if pairSyncIterator, err := pairContract.FilterSync(&bind.FilterOpts{Start: start, End: &start}); err == nil && pairSyncIterator != nil {
+				for pairSyncIterator.Next() {
+					reserves = struct {
+						Reserve0           *big.Int
+						Reserve1           *big.Int
+						BlockTimestampLast uint32
+					}{Reserve0: pairSyncIterator.Event.Reserve0, Reserve1: pairSyncIterator.Event.Reserve1}
+				}
+			}
+		} else {
+			return nil, nil, err
+		}
+	}
+	token0, _ := util.SortToken(baseToken, quoteToken)
+	baseTokenDecimal, err := util.TokenDecimal(u.EthClient, baseToken)
+	if err != nil {
+		return nil, nil, err
+	}
+	quoteTokenDecimal, err := util.TokenDecimal(u.EthClient, quoteToken)
+	if err != nil {
+		return nil, nil, err
+	}
+	if token0 == baseToken {
+		baseReserve := decimal.NewFromBigInt(reserves.Reserve0, int32(-1*baseTokenDecimal))
+		quoteReserve := decimal.NewFromBigInt(reserves.Reserve1, int32(-1*quoteTokenDecimal))
+		return &baseReserve, &quoteReserve, nil
+	} else {
+		baseReserve := decimal.NewFromBigInt(reserves.Reserve1, int32(-1*baseTokenDecimal))
+		quoteReserve := decimal.NewFromBigInt(reserves.Reserve0, int32(-1*quoteTokenDecimal))
+		return &baseReserve, &quoteReserve, nil
+	}
 }

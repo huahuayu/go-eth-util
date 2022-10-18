@@ -41,3 +41,16 @@ func TestDex_SpotPrice(t *testing.T) {
 	}
 	t.Log(priceV3)
 }
+
+func TestDex_Liquidity(t *testing.T) {
+	ethClient, err := ethclient.Dial("https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uniswap, err := NewDex(ethClient, consts.Uniswap, consts.UniswapV3, v3Factory)
+	ra, rb, err := uniswap.Liquidity(&bind.CallOpts{BlockNumber: big.NewInt(15766838)}, USDC, UNI)
+	if err != nil {
+		t.Error(err)
+	}
+	t.Log(ra, rb)
+}
