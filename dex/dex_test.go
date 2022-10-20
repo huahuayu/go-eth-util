@@ -24,22 +24,22 @@ func TestDex_SpotPrice(t *testing.T) {
 	}
 	uniswapV2, err := NewDex(ethClient, consts.Uniswap, consts.UniswapV2, v2Factory)
 	// UNI -> WETH -> USDC
-	priceV2, err := uniswapV2.SpotPrice(nil, UNI, USDC, WETH)
+	routerV2, priceV2, err := uniswapV2.SpotPrice(nil, UNI, USDC, WETH)
 	if err != nil {
 		t.Error(err)
 	}
-	t.Log(priceV2)
+	t.Log(uniswapV2.GetName(), routerV2, priceV2)
 	number, err := ethClient.BlockNumber(context.TODO())
 	if err != nil {
 		t.Error()
 	}
 	uniswapV3, err := NewDex(ethClient, consts.Uniswap, consts.UniswapV3, v3Factory)
 	// uni history price in -100 block
-	priceV3, err := uniswapV3.SpotPrice(&bind.CallOpts{BlockNumber: big.NewInt(int64(number - 100))}, UNI, USDC, WETH)
+	routerV3, priceV3, err := uniswapV3.SpotPrice(&bind.CallOpts{BlockNumber: big.NewInt(int64(number - 100))}, UNI, USDC, WETH)
 	if err != nil {
 		t.Error(err)
 	}
-	t.Log(priceV3)
+	t.Log(uniswapV3.GetName(), routerV3, priceV3)
 }
 
 func TestDex_Liquidity(t *testing.T) {
@@ -48,9 +48,9 @@ func TestDex_Liquidity(t *testing.T) {
 		t.Fatal(err)
 	}
 	uniswap, err := NewDex(ethClient, consts.Uniswap, consts.UniswapV3, v3Factory)
-	ra, rb, err := uniswap.Liquidity(&bind.CallOpts{BlockNumber: big.NewInt(15766838)}, USDC, UNI)
+	pair, ra, rb, err := uniswap.Liquidity(&bind.CallOpts{BlockNumber: big.NewInt(15766838)}, USDC, UNI)
 	if err != nil {
 		t.Error(err)
 	}
-	t.Log(ra, rb)
+	t.Log(pair, ra, rb)
 }

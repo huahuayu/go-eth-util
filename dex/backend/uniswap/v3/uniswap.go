@@ -20,9 +20,10 @@ import (
 type UniswapV3 struct {
 	EthClient *ethclient.Client
 	Factory   *Factory
+	Name      string
 }
 
-func NewUniswap(ethClient *ethclient.Client, factory string) (*UniswapV3, error) {
+func NewUniswap(ethClient *ethclient.Client, factory string, name string) (*UniswapV3, error) {
 	factoryContract, err := NewFactory(common.HexToAddress(factory), ethClient)
 	if err != nil {
 		return nil, err
@@ -30,27 +31,40 @@ func NewUniswap(ethClient *ethclient.Client, factory string) (*UniswapV3, error)
 	return &UniswapV3{
 		EthClient: ethClient,
 		Factory:   factoryContract,
+		Name:      name,
 	}, nil
 }
 
-func (u *UniswapV3) SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleToken ...string) (*decimal.Decimal, error) {
+func (u *UniswapV3) GetName() string {
+	return u.Name
+}
+
+func (u *UniswapV3) SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleToken ...string) ([]string, *decimal.Decimal, error) {
 	if baseToken == quoteToken {
 		p := decimal.NewFromInt(1)
-		return &p, nil
+		return nil, &p, nil
 	}
+	var router = make([]string, 0)
 	if len(middleToken) == 0 {
-		return u.spotPrice(opts, baseToken, quoteToken)
+		pair, price, err := u.spotPrice(opts, baseToken, quoteToken)
+		if err != nil {
+			return nil, nil, err
+		} else {
+			router = append(router, pair)
+			return router, price, nil
+		}
 	}
 	path := append(append([]string{baseToken}, middleToken...), quoteToken)
 	price := decimal.NewFromInt(1)
 	for i := 0; i < len(path)-1; i++ {
-		p, err := u.spotPrice(opts, path[i], path[i+1])
+		pair, p, err := u.spotPrice(opts, path[i], path[i+1])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		router = append(router, pair)
 		price = price.Mul(*p)
 	}
-	return &price, nil
+	return router, &price, nil
 }
 
 func (u *UniswapV3) WatchPairCreated() (event.Subscription, chan *entity.PairCreated, error) {
@@ -105,14 +119,14 @@ func (u *UniswapV3) FilterPairCreated(fromBlock uint64, toBlock *uint64) ([]*ent
 	return res, nil
 }
 
-func (u *UniswapV3) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, error) {
+func (u *UniswapV3) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string) (string, *decimal.Decimal, error) {
 	pair, err := u.PairFor(baseToken, quoteToken)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	pairContract, err := NewV3pair(common.HexToAddress(pair), u.EthClient)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	var sqrtPriceX96Big *big.Int
 	res, err := pairContract.Slot0(opts)
@@ -127,18 +141,18 @@ func (u *UniswapV3) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string)
 				}
 			}
 		} else {
-			return nil, err
+			return "", nil, err
 		}
 	} else {
 		sqrtPriceX96Big = res.SqrtPriceX96
 	}
 	baseTokenDecimal, err := util.TokenDecimal(u.EthClient, baseToken)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	quoteTokenDecimal, err := util.TokenDecimal(u.EthClient, quoteToken)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	token0, _ := util.SortToken(baseToken, quoteToken)
 	//    sqrtPriceX96 = sqrt(price) * 2 ** 96
@@ -151,12 +165,12 @@ func (u *UniswapV3) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string)
 		price = price.Mul(decimal.NewFromInt(10).Pow(decimal.NewFromInt(int64(baseTokenDecimal - quoteTokenDecimal))))
 	} else {
 		if price.String() == "0" {
-			return nil, errors.New("price is zero")
+			return "", nil, errors.New("price is zero")
 		}
 		price = price.Mul(decimal.NewFromInt(10).Pow(decimal.NewFromInt(int64(quoteTokenDecimal - baseTokenDecimal))))
 		price = decimal.NewFromInt(1).Div(price)
 	}
-	return &price, nil
+	return pair, &price, nil
 }
 
 func (u *UniswapV3) PairFor(baseToken, quoteToken string, feeRate ...int) (string, error) {
@@ -185,33 +199,33 @@ func (u *UniswapV3) PairFor(baseToken, quoteToken string, feeRate ...int) (strin
 	return pair, nil
 }
 
-func (u *UniswapV3) Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error) {
+func (u *UniswapV3) Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (string, *decimal.Decimal, *decimal.Decimal, error) {
 	pair, err := u.PairFor(baseToken, quoteToken)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	baseTokenDecimal, err := util.TokenDecimal(u.EthClient, baseToken)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	quoteTokenDecimal, err := util.TokenDecimal(u.EthClient, quoteToken)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	var baseReserve, quoteReserve decimal.Decimal
 	if erc20, _ := erc20.NewIerc20(common.HexToAddress(baseToken), u.EthClient); erc20 != nil {
 		if balance, err := erc20.BalanceOf(opts, common.HexToAddress(pair)); balance != nil && err == nil {
 			baseReserve = decimal.NewFromBigInt(balance, -int32(baseTokenDecimal))
 		} else {
-			return nil, nil, err
+			return "", nil, nil, err
 		}
 	}
 	if erc20, _ := erc20.NewIerc20(common.HexToAddress(quoteToken), u.EthClient); erc20 != nil {
 		if balance, err := erc20.BalanceOf(opts, common.HexToAddress(pair)); balance != nil && err == nil {
 			quoteReserve = decimal.NewFromBigInt(balance, -int32(quoteTokenDecimal))
 		} else {
-			return nil, nil, err
+			return "", nil, nil, err
 		}
 	}
-	return &baseReserve, &quoteReserve, nil
+	return pair, &baseReserve, &quoteReserve, nil
 }

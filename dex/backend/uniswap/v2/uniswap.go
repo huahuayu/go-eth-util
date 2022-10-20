@@ -19,9 +19,10 @@ import (
 type UniswapV2 struct {
 	EthClient *ethclient.Client
 	Factory   *Factory
+	Name      string
 }
 
-func NewUniswap(ethClient *ethclient.Client, factory string) (*UniswapV2, error) {
+func NewUniswap(ethClient *ethclient.Client, factory string, name string) (*UniswapV2, error) {
 	factoryContract, err := NewFactory(common.HexToAddress(factory), ethClient)
 	if err != nil {
 		return nil, err
@@ -29,27 +30,40 @@ func NewUniswap(ethClient *ethclient.Client, factory string) (*UniswapV2, error)
 	return &UniswapV2{
 		EthClient: ethClient,
 		Factory:   factoryContract,
+		Name:      name,
 	}, nil
 }
 
-func (u *UniswapV2) SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleToken ...string) (*decimal.Decimal, error) {
+func (u *UniswapV2) GetName() string {
+	return u.Name
+}
+
+func (u *UniswapV2) SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleToken ...string) ([]string, *decimal.Decimal, error) {
 	if baseToken == quoteToken {
 		p := decimal.NewFromInt(1)
-		return &p, nil
+		return nil, &p, nil
 	}
+	var router = make([]string, 0)
 	if len(middleToken) == 0 {
-		return u.spotPrice(opts, baseToken, quoteToken)
+		pair, price, err := u.spotPrice(opts, baseToken, quoteToken)
+		if err != nil {
+			return nil, nil, err
+		} else {
+			router = append(router, pair)
+			return router, price, nil
+		}
 	}
 	path := append(append([]string{baseToken}, middleToken...), quoteToken)
 	price := decimal.NewFromInt(1)
 	for i := 0; i < len(path)-1; i++ {
-		p, err := u.spotPrice(opts, path[i], path[i+1])
+		pair, p, err := u.spotPrice(opts, path[i], path[i+1])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		router = append(router, pair)
 		price = price.Mul(*p)
 	}
-	return &price, nil
+	return router, &price, nil
 }
 
 func (u *UniswapV2) WatchPairCreated() (event.Subscription, chan *entity.PairCreated, error) {
@@ -100,13 +114,13 @@ func (u *UniswapV2) FilterPairCreated(fromBlock uint64, toBlock *uint64) ([]*ent
 	return res, nil
 }
 
-func (u *UniswapV2) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, error) {
-	baseReserves, quoteReserves, err := u.Liquidity(opts, baseToken, quoteToken)
+func (u *UniswapV2) spotPrice(opts *bind.CallOpts, baseToken, quoteToken string) (string, *decimal.Decimal, error) {
+	pair, baseReserves, quoteReserves, err := u.Liquidity(opts, baseToken, quoteToken)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 	price := quoteReserves.Div(*baseReserves)
-	return &price, nil
+	return pair, &price, nil
 }
 
 func (u *UniswapV2) PairFor(baseToken, quoteToken string, feeRate ...int) (string, error) {
@@ -120,14 +134,14 @@ func (u *UniswapV2) PairFor(baseToken, quoteToken string, feeRate ...int) (strin
 	return pair.String(), nil
 }
 
-func (u *UniswapV2) Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error) {
+func (u *UniswapV2) Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (string, *decimal.Decimal, *decimal.Decimal, error) {
 	p, err := u.PairFor(baseToken, quoteToken)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	pairContract, err := NewPair(common.HexToAddress(p), u.EthClient)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	reserves, err := pairContract.GetReserves(opts)
 	if err != nil {
@@ -145,25 +159,25 @@ func (u *UniswapV2) Liquidity(opts *bind.CallOpts, baseToken, quoteToken string)
 				}
 			}
 		} else {
-			return nil, nil, err
+			return "", nil, nil, err
 		}
 	}
 	token0, _ := util.SortToken(baseToken, quoteToken)
 	baseTokenDecimal, err := util.TokenDecimal(u.EthClient, baseToken)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	quoteTokenDecimal, err := util.TokenDecimal(u.EthClient, quoteToken)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, nil, err
 	}
 	if token0 == baseToken {
 		baseReserve := decimal.NewFromBigInt(reserves.Reserve0, int32(-1*baseTokenDecimal))
 		quoteReserve := decimal.NewFromBigInt(reserves.Reserve1, int32(-1*quoteTokenDecimal))
-		return &baseReserve, &quoteReserve, nil
+		return p, &baseReserve, &quoteReserve, nil
 	} else {
 		baseReserve := decimal.NewFromBigInt(reserves.Reserve1, int32(-1*baseTokenDecimal))
 		quoteReserve := decimal.NewFromBigInt(reserves.Reserve0, int32(-1*quoteTokenDecimal))
-		return &baseReserve, &quoteReserve, nil
+		return p, &baseReserve, &quoteReserve, nil
 	}
 }

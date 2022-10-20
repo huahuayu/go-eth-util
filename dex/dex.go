@@ -10,12 +10,15 @@ import (
 )
 
 type IDex interface {
+	// GetName returns dex name
+	GetName() string
 	// SpotPrice returns the spot price of baseToken/quoteToken, it indicates how much of the quote token is needed to purchase one unit of the base token.
 	// If middleToken is not empty, it indicates the price of baseToken/middleTokens/quoteToken.
 	// Get history spot price by specify blockNumber in call opts , if blockNumber is nil, it will return the latest spot price.
-	SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleTokens ...string) (*decimal.Decimal, error)
-	// Liquidity returns the liquidity of the pair.
-	Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error)
+	// returns pair router, spot price, error
+	SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleTokens ...string) ([]string, *decimal.Decimal, error)
+	// Liquidity returns the pair name and liquidity of the pair.
+	Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (string, *decimal.Decimal, *decimal.Decimal, error)
 }
 
 func NewDex(ethClient *ethclient.Client, protocol string, version string, param any) (IDex, error) {

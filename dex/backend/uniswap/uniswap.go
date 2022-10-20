@@ -13,8 +13,10 @@ import (
 )
 
 type IUniswap interface {
+	// GetName returns dex name
+	GetName() string
 	// SpotPrice returns the price of baseToken/quoteToken, it indicates how much of the quote token is needed to purchase one unit of the base token.
-	SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleToken ...string) (*decimal.Decimal, error)
+	SpotPrice(opts *bind.CallOpts, baseToken, quoteToken string, middleToken ...string) ([]string, *decimal.Decimal, error)
 	// PairFor returns the pair address of baseToken and quoteToken.
 	PairFor(baseToken, quoteToken string, feeRate ...int) (string, error)
 	// WatchPairCreated watches the event of PairCreated.
@@ -22,15 +24,15 @@ type IUniswap interface {
 	// FilterPairCreated returns the event of PairCreated with block range.
 	FilterPairCreated(fromBlock uint64, toBlock *uint64) ([]*entity.PairCreated, error)
 	// Liquidity returns the liquidity of the pair.
-	Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (*decimal.Decimal, *decimal.Decimal, error)
+	Liquidity(opts *bind.CallOpts, baseToken, quoteToken string) (string, *decimal.Decimal, *decimal.Decimal, error)
 }
 
 func NewUniswap(ethClient *ethclient.Client, version string, factory string) (IUniswap, error) {
 	switch version {
 	case consts.UniswapV2:
-		return v2.NewUniswap(ethClient, factory)
+		return v2.NewUniswap(ethClient, factory, consts.UniswapV2+"-"+factory)
 	case consts.UniswapV3:
-		return v3.NewUniswap(ethClient, factory)
+		return v3.NewUniswap(ethClient, factory, consts.UniswapV3+"-"+factory)
 	default:
 		return nil, errors.New("unsupported uniswap version")
 	}
